@@ -1,12 +1,13 @@
 ﻿using DotNetApiDb;
+using DotNetApiLogging;
+using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
+using SharpCompress.Common;
+using System.Data;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
-using DotNetApiLogging;
-using Microsoft.AspNetCore.Mvc.RazorPages;
-using System.Data;
 
 namespace DotNetApiMongoDb
 {
@@ -63,21 +64,19 @@ namespace DotNetApiMongoDb
         /// <exception cref="ArgumentNullException"></exception>
         public async Task InsertAsync<EntityType, IdType>(EntityType entity) where EntityType : IDbEntity<IdType>
         {
-            using (_logger.LogCaller())
+            _logger.LogInformationCaller("InsertAsync {@entity}", args: [entity]);
+            if (entity == null)
             {
-                if (entity == null)
-                {
-                    throw new ArgumentNullException("Null entities cannot be saved");
-                }
-                if (_session == null)
-                {
-                    throw new InvalidOperationException("Begin transatino must be called first");
-                }
-                var collection = GetCollectionForEntityType<EntityType>();
-                _logger.LogInformation("Inserting {Id}", entity.Id);
-                await collection.InsertOneAsync(_session, entity);
-                _logger.LogInformation("Inserted {Id}", entity.Id);
+                throw new ArgumentNullException("Null entities cannot be saved");
             }
+            if (_session == null)
+            {
+                throw new InvalidOperationException("Begin transatino must be called first");
+            }
+            var collection = GetCollectionForEntityType<EntityType>();
+            _logger.LogInformation("Inserting {Id}", entity.Id);
+            await collection.InsertOneAsync(_session, entity);
+            _logger.LogInformation("Inserted {Id}", entity.Id);
         }
 
         /// <summary>
@@ -90,18 +89,16 @@ namespace DotNetApiMongoDb
         /// <exception cref="ArgumentNullException">Thrown if the entity is null</exception>
         public async Task UpdateAsync<EntityType, IdType>(EntityType entity) where EntityType : IDbEntity<IdType> where IdType : IComparable
         {
-            using (_logger.LogCaller())
+            _logger.LogInformationCaller("UpdateAsync {@entity}", args: [entity]);
+            if (entity == null)
             {
-                if (entity == null)
-                {
-                    throw new ArgumentNullException("Null entities cannot be saved");
-                }
-                var collection = GetCollectionForEntityType<EntityType>();
-                var filter = IdFilter<EntityType, IdType>(entity.Id);
-                _logger.LogInformation("Replacing {Id}", entity.Id);
-                await collection.ReplaceOneAsync<EntityType>(_session, doc => doc.Id.Equals(entity.Id), entity);
-                _logger.LogInformation("Replaced {Id}", entity.Id);
+                throw new ArgumentNullException("Null entities cannot be saved");
             }
+            var collection = GetCollectionForEntityType<EntityType>();
+            var filter = IdFilter<EntityType, IdType>(entity.Id);
+            _logger.LogInformation("Replacing {Id}", entity.Id);
+            await collection.ReplaceOneAsync<EntityType>(_session, doc => doc.Id.Equals(entity.Id), entity);
+            _logger.LogInformation("Replaced {Id}", entity.Id);
         }
 
         /// <summary>
@@ -113,18 +110,16 @@ namespace DotNetApiMongoDb
         /// <returns></returns>
         public async Task DeleteAsync<EntityType, IdType>(EntityType entity) where EntityType : IDbEntity<IdType>
         {
-            using (_logger.LogCaller())
+            _logger.LogInformationCaller("DeleteAsync {@entity}", args: [entity]);
+            if (_session == null)
             {
-                if (_session == null)
-                {
-                    throw new InvalidOperationException("Begin transatino must be called first");
-                }
-                var collection = GetCollectionForEntityType<EntityType>();
-                var filter = IdFilter<EntityType, IdType>(entity.Id);
-                _logger.LogInformation("Deleting {Id}", entity.Id);
-                await collection.DeleteOneAsync(_session, filter);
-                _logger.LogInformation("Deleted {Id}", entity.Id);
+                throw new InvalidOperationException("Begin transatino must be called first");
             }
+            var collection = GetCollectionForEntityType<EntityType>();
+            var filter = IdFilter<EntityType, IdType>(entity.Id);
+            _logger.LogInformation("Deleting {Id}", entity.Id);
+            await collection.DeleteOneAsync(_session, filter);
+            _logger.LogInformation("Deleted {Id}", entity.Id);
         }
 
         /// <summary>
@@ -137,19 +132,17 @@ namespace DotNetApiMongoDb
         /// <exception cref="DbEntityNotFoundException{IdType}">Thrown if the entity isn't found</exception>
         public async Task<EntityType> GetAsync<EntityType, IdType>(IdType id)
         {
-            using (_logger.LogCaller())
+            _logger.LogInformationCaller("GetAsync {@id}", args: [id]);
+            var collection = GetCollectionForEntityType<EntityType>();
+            var filter = IdFilter<EntityType, IdType>(id);
+            _logger.LogInformation("Getting {Id}", id);
+            var entities = await (await collection.FindAsync<EntityType>(filter)).ToListAsync();
+            _logger.LogInformation("Got {Id}", id);
+            if (!entities.Any())
             {
-                var collection = GetCollectionForEntityType<EntityType>();
-                var filter = IdFilter<EntityType, IdType>(id);
-                _logger.LogInformation("Getting {Id}", id);
-                var entities = await (await collection.FindAsync<EntityType>(filter)).ToListAsync();
-                _logger.LogInformation("Got {Id}", id);
-                if (!entities.Any())
-                {
-                    throw new DbEntityNotFoundException<IdType>(id);
-                }
-                return entities.First();
+                throw new DbEntityNotFoundException<IdType>(id);
             }
+            return entities.First();
         }
 
         /// <summary>
@@ -161,19 +154,17 @@ namespace DotNetApiMongoDb
         public async Task<IEnumerable<DbType>> GetAsync<DbType, IdType>(Expression<Func<DbType, bool>> expression, Paging paging, Expression<Func<DbType, object>>? sort = null) where DbType : IDbEntity<IdType>
         {
             Expression<Func<DbType, object>> sortBy = GetSortBy<DbType, IdType>(sort);
-            using (_logger.LogCaller())
-            {
-                var collection = GetCollectionForEntityType<DbType>();
-                var filter = Builders<DbType>.Filter.Where(expression);
-                _logger.LogInformation("Getting by expression");
-                var entities = await collection.Find(filter)
-                    .SortBy(sortBy)
-                    .Skip((paging.PageNumber - 1) * paging.PageSize)
-                    .Limit(paging.PageSize)
-                    .ToListAsync();
-                _logger.LogInformation("Got by expression");
-                return entities;
-            }
+            _logger.LogInformationCaller("GetAsync expression: {@expression}, paging: {@paging}, sortBy: {@sortBy}", args: [expression, paging, sortBy]);
+            var collection = GetCollectionForEntityType<DbType>();
+            var filter = Builders<DbType>.Filter.Where(expression);
+            _logger.LogInformation("Getting by expression");
+            var entities = await collection.Find(filter)
+                .SortBy(sortBy)
+                .Skip((paging.PageNumber - 1) * paging.PageSize)
+                .Limit(paging.PageSize)
+                .ToListAsync();
+            _logger.LogInformation("Got by expression");
+            return entities;
         }
 
         /// <summary>
@@ -185,19 +176,17 @@ namespace DotNetApiMongoDb
         public async Task<IEnumerable<DbType>> GetAsync<DbType, IdType>(Paging paging, Expression<Func<DbType, object>>? sort = null) where DbType : IDbEntity<IdType>
         {
             Expression<Func<DbType, object>> sortBy = GetSortBy<DbType, IdType>(sort);
-            using (_logger.LogCaller())
-            {
-                var collection = GetCollectionForEntityType<DbType>();
-                var filter = Builders<DbType>.Filter.Empty;
-                _logger.LogInformation("Getting all");
-                var entities = await collection.Find(filter)
-                    .SortBy(sortBy)
-                    .Skip((paging.PageNumber - 1) * paging.PageSize)
-                    .Limit(paging.PageSize)
-                    .ToListAsync();
-                _logger.LogInformation("Got all");
-                return entities;
-            }
+            _logger.LogInformationCaller("GetAsync paging: {@paging}, sortBy: {@sortBy}", args: [paging, sortBy]);
+            var collection = GetCollectionForEntityType<DbType>();
+            var filter = Builders<DbType>.Filter.Empty;
+            _logger.LogInformation("Getting all");
+            var entities = await collection.Find(filter)
+                .SortBy(sortBy)
+                .Skip((paging.PageNumber - 1) * paging.PageSize)
+                .Limit(paging.PageSize)
+                .ToListAsync();
+            _logger.LogInformation("Got all");
+            return entities;
         }
 
         /// <summary>
